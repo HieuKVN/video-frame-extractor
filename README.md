@@ -2,7 +2,10 @@
 
 Simple app to **extract frames** from multiple videos at a **specific timestamp**.
 
+_AI was used during the development process._
+
 ## Tech Stack
+
 - Python
 - OpenCV
 - CustomTkinter
@@ -15,7 +18,6 @@ cd video-frame-extractor
 pip install -r requirements.txt
 ```
 
-
 ## Run
 
 ```bash
@@ -26,11 +28,10 @@ or build `.exe`:
 
 ```bash
 pip install pyinstaller
-pyinstaller --noconsole --onefile --name "FrameExtractor" --icon=icon.ico main.py
+pyinstaller --noconsole --onefile --name "FrameExtractor" main.py
 ```
 
 - `.exe` will be in the `dist/` folder
-- If you don't have `icon.ico`, remove `--icon=icon.ico`
 
 ## How to use
 
@@ -39,9 +40,8 @@ pyinstaller --noconsole --onefile --name "FrameExtractor" --icon=icon.ico main.p
 - Enter timestamp (format `mm:ss`)
 - Click **Extract Frame**
 
-Frames are saved as `.jpg`, based on video name.
-
 ## Notes
-- Special characters in filenames are auto-fixed.
-- Corrupt videos are skipped.
-- Shows total frames extracted when done.
+
+- Special characters in filenames are auto-fixed
+- Corrupt videos are skipped
+- Shows total frames extracted when done
