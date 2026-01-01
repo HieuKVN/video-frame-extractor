@@ -1,213 +1,197 @@
-import customtkinter as ctk
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 import tkinter.filedialog as fd
 from tkinter import messagebox
-import os
+import customtkinter as ctk
 import cv2
-import threading
-import unicodedata
-from pathlib import Path
 
-VIDEO_EXTENSIONS = ('.mp4', '.mkv', '.avi', '.mov')
+VIDEO_EXTENSIONS = {'.mp4', '.mkv', '.avi', '.mov', '.flv', '.wmv', '.webm'}
+MAX_WORKERS = 4
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
+
 class VideoFrameExtractor(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("Tách Frame từ Video")
-        self.geometry("700x480")
-        self.configure(fg_color="#101010")
+        self.title("Video Frame Extractor Pro")
+        self.geometry("720x450")
 
         self.input_folder = ctk.StringVar()
         self.output_folder = ctk.StringVar()
-        self.is_processing = False
         self.auto_output = ctk.BooleanVar(value=True)
+        self.stop_event = threading.Event()
+        self.is_running = False
+
         self.setup_ui()
 
     def setup_ui(self):
         self.grid_columnconfigure(0, weight=1)
+
         f1 = ctk.CTkFrame(self)
         f1.grid(row=0, column=0, padx=20, pady=(20, 10), sticky="ew")
         f1.grid_columnconfigure(0, weight=1)
-        
-        ctk.CTkLabel(f1, text="📂 Thư mục video:", font=ctk.CTkFont(size=13, weight="bold")).grid(
-            row=0, column=0, sticky="w", padx=15, pady=(8, 0))
-        ctk.CTkEntry(f1, textvariable=self.input_folder).grid(
-            row=1, column=0, padx=15, pady=8, sticky="ew")
-        ctk.CTkButton(f1, text="Chọn", command=self.select_input_folder,
-                      width=90).grid(row=1, column=1, padx=10, pady=8)
+
+        ctk.CTkLabel(f1, text="Thư mục video:", font=("Arial", 13, "bold")).grid(row=0, column=0, sticky="w", padx=15, pady=(10,0))
+        ctk.CTkEntry(f1, textvariable=self.input_folder).grid(row=1, column=0, padx=15, pady=10, sticky="ew")
+        ctk.CTkButton(f1, text="Chọn", width=80, command=self.select_input).grid(row=1, column=1, padx=10)
 
         f2 = ctk.CTkFrame(self)
         f2.grid(row=1, column=0, padx=20, pady=10, sticky="ew")
         f2.grid_columnconfigure(0, weight=1)
-        
-        ctk.CTkLabel(f2, text="💾 Thư mục lưu ảnh:", font=ctk.CTkFont(size=13, weight="bold")).grid(
-            row=0, column=0, sticky="w", padx=15, pady=(8, 0))
-        self.output_entry = ctk.CTkEntry(f2, textvariable=self.output_folder, state="disabled")
-        self.output_entry.grid(row=1, column=0, padx=15, pady=8, sticky="ew")
-        self.output_button = ctk.CTkButton(f2, text="Chọn", command=self.select_output_folder,
-                      width=90, state="disabled")
-        self.output_button.grid(row=1, column=1, padx=10, pady=8)
-        ctk.CTkCheckBox(f2, text="Tự động (cùng thư mục video)", variable=self.auto_output,
-                       command=self.toggle_output_folder).grid(row=2, column=0, columnspan=2, padx=15, pady=(0, 8), sticky="w")
+
+        ctk.CTkLabel(f2, text="Thư mục lưu ảnh:", font=("Arial", 13, "bold")).grid(row=0, column=0, sticky="w", padx=15, pady=(10,0))
+        self.out_entry = ctk.CTkEntry(f2, textvariable=self.output_folder, state="disabled")
+        self.out_entry.grid(row=1, column=0, padx=15, pady=10, sticky="ew")
+        self.out_btn = ctk.CTkButton(f2, text="Chọn", width=80, command=self.select_output, state="disabled")
+        self.out_btn.grid(row=1, column=1, padx=10)
+
+        ctk.CTkCheckBox(f2, text="Lưu cùng thư mục gốc", variable=self.auto_output, command=self.toggle_output).grid(row=2, column=0, padx=15, pady=(0,10), sticky="w")
 
         f3 = ctk.CTkFrame(self)
         f3.grid(row=2, column=0, padx=20, pady=10, sticky="ew")
         f3.grid_columnconfigure(1, weight=1)
-        
-        ctk.CTkLabel(f3, text="⏱ Thời gian (mm:ss):", font=ctk.CTkFont(size=13, weight="bold")).grid(
-            row=0, column=0, sticky="w", padx=15, pady=(8, 0))
-        self.time_entry = ctk.CTkEntry(f3, width=110, placeholder_text="00:15")
+
+        ctk.CTkLabel(f3, text="Thời điểm (mm:ss):", font=("Arial", 13, "bold")).grid(row=0, column=0, sticky="w", padx=15, pady=(10,0))
+        self.time_entry = ctk.CTkEntry(f3, width=120, placeholder_text="00:15")
         self.time_entry.insert(0, "00:15")
-        self.time_entry.grid(row=1, column=0, padx=15, pady=8)
-        self.extract_button = ctk.CTkButton(
-            f3, text="✨ Tách ảnh", command=self.run_extraction,
-            height=40, font=ctk.CTkFont(size=15, weight="bold")
-        )
-        self.extract_button.grid(row=1, column=1, padx=15, pady=8, sticky="ew")
+        self.time_entry.grid(row=1, column=0, padx=15, pady=10)
 
-        f4 = ctk.CTkFrame(self)
-        f4.grid(row=3, column=0, padx=20, pady=(10, 20), sticky="ew")
+        self.btn_action = ctk.CTkButton(f3, text="Bắt đầu tách", command=self.toggle_processing, height=40, font=("Arial", 14, "bold"))
+        self.btn_action.grid(row=1, column=1, padx=15, pady=10, sticky="ew")
+
+        f4 = ctk.CTkFrame(self, fg_color="transparent")
+        f4.grid(row=3, column=0, padx=20, pady=10, sticky="ew")
         f4.grid_columnconfigure(0, weight=1)
-        
-        self.status_label = ctk.CTkLabel(
-            f4, text="✅ Sẵn sàng", anchor="center", font=ctk.CTkFont(size=13))
-        self.status_label.grid(row=0, column=0, padx=15, pady=(12, 6), sticky="ew")
-        self.progress_bar = ctk.CTkProgressBar(f4, height=14, progress_color="#4da6ff")
-        self.progress_bar.grid(row=1, column=0, padx=20, pady=(0, 12), sticky="ew")
-        self.progress_bar.set(0)
 
-    def select_input_folder(self):
+        self.status_lbl = ctk.CTkLabel(f4, text="Sẵn sàng", text_color="gray")
+        self.status_lbl.grid(row=0, column=0, sticky="ew")
+        self.progress = ctk.CTkProgressBar(f4, height=12)
+        self.progress.grid(row=1, column=0, pady=5, sticky="ew")
+        self.progress.set(0)
+
+    def select_input(self):
         path = fd.askdirectory()
         if path:
             self.input_folder.set(path)
             if self.auto_output.get():
                 self.output_folder.set(path)
-            try:
-                count = len([f for f in os.listdir(path)
-                            if f.lower().endswith(VIDEO_EXTENSIONS)])
-                self.status_label.configure(
-                    text=f"Đã tìm thấy {count} video" if count else "Không tìm thấy video nào")
-            except OSError as e:
-                messagebox.showerror("Lỗi", f"Không thể đọc thư mục: {e}")
+            count = len([f for f in Path(path).glob('*') if f.suffix.lower() in VIDEO_EXTENSIONS])
+            self.status_lbl.configure(text=f"Tìm thấy {count} video", text_color="white")
 
-    def select_output_folder(self):
+    def select_output(self):
         path = fd.askdirectory()
-        if path:
-            self.output_folder.set(path)
+        if path: self.output_folder.set(path)
 
-    def toggle_output_folder(self):
-        if self.auto_output.get():
-            self.output_entry.configure(state="disabled")
-            self.output_button.configure(state="disabled")
-            if self.input_folder.get():
-                self.output_folder.set(self.input_folder.get())
-        else:
-            self.output_entry.configure(state="normal")
-            self.output_button.configure(state="normal")
-
-    def run_extraction(self):
-        if self.is_processing:
-            return
-        if not self.input_folder.get():
-            messagebox.showerror("Thiếu thông tin", "Vui lòng chọn thư mục video.")
-            return
-        if self.auto_output.get():
+    def toggle_output(self):
+        state = "disabled" if self.auto_output.get() else "normal"
+        self.out_entry.configure(state=state)
+        self.out_btn.configure(state=state)
+        if self.auto_output.get() and self.input_folder.get():
             self.output_folder.set(self.input_folder.get())
-        if not self.output_folder.get() or not self.time_entry.get():
-            messagebox.showerror("Thiếu thông tin", "Vui lòng chọn đủ thư mục và thời gian.")
-            return
-        self.is_processing = True
-        self.extract_button.configure(state="disabled")
-        threading.Thread(target=self.extract_frames_with_progress, daemon=True).start()
 
-    def validate_time(self, time_str):
+    def parse_time(self, time_str):
         try:
-            m, s = map(int, time_str.strip().split(':'))
-            if not (0 <= m <= 999 and 0 <= s <= 59):
-                return None
-            return m * 60 + s
+            parts = list(map(int, time_str.strip().split(':')))
+            if len(parts) == 1: return parts[0]
+            if len(parts) == 2: return parts[0]*60 + parts[1]
+            if len(parts) == 3: return parts[0]*3600 + parts[1]*60 + parts[2]
+        except: return None
+        return None
+
+    def toggle_processing(self):
+        if self.is_running:
+            self.stop_event.set()
+            self.btn_action.configure(text="Đang dừng...", state="disabled")
+            return
+
+        in_path = self.input_folder.get()
+        out_path = self.output_folder.get()
+        seconds = self.parse_time(self.time_entry.get())
+
+        if not in_path or not out_path:
+            messagebox.showwarning("Thiếu thông tin", "Vui lòng chọn thư mục input/output.")
+            return
+        if seconds is None:
+            messagebox.showwarning("Lỗi", "Thời gian không hợp lệ.")
+            return
+
+        self.is_running = True
+        self.stop_event.clear()
+        self.btn_action.configure(text="Dừng lại", fg_color="#c0392b", hover_color="#e74c3c")
+
+        threading.Thread(target=self.process_batch, args=(in_path, out_path, seconds), daemon=True).start()
+
+    def process_one_video(self, file_path: Path, out_dir: Path, target_sec: int):
+        if self.stop_event.is_set(): return False
+
+        try:
+            cap = cv2.VideoCapture(str(file_path))
+            if not cap.isOpened(): return False
+
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            if fps <= 0: return False
+
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            frame_idx = min(int(fps * target_sec), total_frames - 1)
+
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+            ret, frame = cap.read()
+            cap.release()
+
+            if ret:
+                safe_name = file_path.stem.translate(str.maketrans('<>:"/\\|?*', '_________'))
+                out_file = out_dir / f"{safe_name}.jpg"
+
+                is_success, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
+                if is_success:
+                    with open(out_file, "wb") as f:
+                        f.write(buffer)
+                return True
         except:
-            return None
+            pass
+        return False
 
-    def extract_frames_with_progress(self):
-        target_sec = self.validate_time(self.time_entry.get())
-        if target_sec is None:
-            self.status_label.configure(text="❌ Lỗi: Thời gian không hợp lệ")
-            messagebox.showerror("Lỗi", "Thời gian không hợp lệ (mm:ss).")
+    def process_batch(self, in_dir, out_dir, seconds):
+        files = [f for f in Path(in_dir).glob('*') if f.suffix.lower() in VIDEO_EXTENSIONS]
+        total = len(files)
+
+        if total == 0:
+            self.after(0, lambda: messagebox.showinfo("Thông báo", "Không tìm thấy video nào!"))
             self.reset_ui()
             return
 
-        input_path, output_path = self.input_folder.get(), self.output_folder.get()
-        os.makedirs(output_path, exist_ok=True)
+        Path(out_dir).mkdir(parents=True, exist_ok=True)
 
-        videos = [f for f in os.listdir(
-            input_path) if f.lower().endswith(VIDEO_EXTENSIONS)]
-        total = len(videos)
-        if not total:
-            self.status_label.configure(text="❌ Không tìm thấy video nào")
-            messagebox.showerror("Lỗi", "Không có video trong thư mục.")
-            self.reset_ui()
-            return
+        completed = 0
+        success_count = 0
 
-        count, log = 0, []
-        for i, file in enumerate(videos, start=1):
-            self.progress_bar.set(i/total)
-            self.status_label.configure(text=f"⏳ Đang xử lý: {i}/{total}")
-            full_path = os.path.join(input_path, file)
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            futures = {executor.submit(self.process_one_video, f, Path(out_dir), seconds): f for f in files}
 
-            try:
-                cap = cv2.VideoCapture(full_path)
-                if not cap.isOpened():
-                    log.append(
-                        f"Lỗi: Không thể mở {file} (file có thể bị hỏng hoặc định dạng không hỗ trợ)")
-                    continue
+            for future in futures:
+                if self.stop_event.is_set(): break
+                if future.result(): success_count += 1
+                completed += 1
 
-                total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-                if total_frames <= 0:
-                    log.append(f"Lỗi: {file} không có frames hoặc bị hỏng")
-                    continue
+                prog = completed / total
+                msg = f"Đang xử lý: {completed}/{total} ({int(prog*100)}%)"
+                self.after(0, lambda p=prog, m=msg: self.update_progress(p, m))
 
-                fps = cap.get(cv2.CAP_PROP_FPS)
-                if fps <= 0:
-                    log.append(f"Lỗi: Không thể đọc FPS của {file}")
-                    continue
+        final_msg = "Đã dừng bởi người dùng." if self.stop_event.is_set() else "Hoàn tất!"
+        self.after(0, lambda: messagebox.showinfo(final_msg, f"Đã xuất thành công: {success_count}/{total} ảnh"))
+        self.after(0, self.reset_ui)
 
-                frame_pos = min(int(fps * target_sec), total_frames - 1)
-                cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, frame_pos))
-                ret, frame = cap.read()
-                if not ret:
-                    log.append(
-                        f"Lỗi: Không thể đọc frame tại {target_sec}s của {file}")
-                    continue
-
-                safe_name = unicodedata.normalize('NFKD', Path(file).stem)
-                safe_name = safe_name.encode('ascii', 'ignore').decode()
-                safe_name = "".join(c if c.isalnum() or c in "._- " else "_" for c in safe_name).strip()
-                safe_name = safe_name or f"image_{i}"
-                filename = f"{safe_name}.jpg"
-                save_path = os.path.join(output_path, filename)
-
-                if cv2.imwrite(save_path, frame, [cv2.IMWRITE_JPEG_QUALITY, 85]):
-                    count += 1
-                    if count <= 10:
-                        log.append(f"{Path(file).stem} → {filename}")
-            finally:
-                cap.release()
-
-        self.progress_bar.set(1)
-        self.status_label.configure(text=f"🎉 Đã xuất {count}/{total} ảnh")
-
-        msg = f"Đã xuất {count} ảnh vào:\n{output_path}"
-        if log:
-            msg += "\n\n" + "\n".join(log)
-        messagebox.showinfo("Hoàn tất", msg)
-        self.reset_ui()
+    def update_progress(self, val, msg):
+        self.progress.set(val)
+        self.status_lbl.configure(text=msg)
 
     def reset_ui(self):
-        self.is_processing = False
-        self.extract_button.configure(state="normal")
-
+        self.is_running = False
+        self.btn_action.configure(text="Bắt đầu tách", fg_color="#1f6aa5", hover_color="#144870", state="normal")
+        self.status_lbl.configure(text="Sẵn sàng")
+        self.progress.set(0)
 
 if __name__ == "__main__":
     VideoFrameExtractor().mainloop()
