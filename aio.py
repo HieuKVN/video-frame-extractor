@@ -1,18 +1,3 @@
-"""
-AIO Video Tool - Professional Frame Extraction & Timeline Generation
-Built with PySide6 (Qt6) - Beautiful Dark Mode
-
-OPTIMIZED VERSION with:
-- 60% faster XML generation using ElementTree
-- 47% less memory usage with log limiting
-- Improved error handling with detailed logging
-- Input validation with regex patterns
-- File caching for better performance
-- Enhanced UI/UX with progress indicators
-- Drag-and-drop support
-- Keyboard shortcuts
-"""
-
 import difflib
 import html
 import multiprocessing
@@ -59,7 +44,6 @@ VIDEO_EXTENSIONS: Set[str] = {'.mp4', '.mkv', '.avi', '.mov', '.flv', '.wmv', '.
 IMAGE_EXTENSIONS: Set[str] = {".png", ".jpg", ".jpeg", ".bmp", ".webp"}
 MAX_WORKERS = min(32, (multiprocessing.cpu_count() or 1) + 4)
 
-# NEW: Validation patterns
 TIMECODE_PATTERN = re.compile(r'^\d{2}:\d{2}:\d{2}:\d{2}$')
 TIME_EXTRACT_PATTERN = re.compile(r'^(\d+|\d{2}:\d{2}|\d{2}:\d{2}:\d{2})$')
 
@@ -86,7 +70,6 @@ ICONS = {
     "HEADER": "▸"
 }
 
-# --- UTILITY FUNCTIONS ---
 
 def sanitize_filename(filename: str) -> str:
     """Sanitize filename by replacing invalid characters with underscores."""
@@ -130,7 +113,6 @@ def parse_timeline_timecode(tc_str: str, fps: int) -> Optional[int]:
         pass
     return None
 
-# NEW: Validation functions
 def validate_timecode(tc: str) -> bool:
     """Validate timeline timecode format (HH:MM:SS:FF)."""
     return bool(TIMECODE_PATTERN.match(tc.strip()))
@@ -147,7 +129,6 @@ def create_log_formatter(color: str, bold: bool = False) -> QTextCharFormat:
         fmt.setFontWeight(QFont.Bold)
     return fmt
 
-# NEW: File caching for better performance
 @lru_cache(maxsize=10)
 def get_image_files_cached(folder: str) -> Tuple[str, ...]:
     """Cache image file listings to avoid repeated directory scans."""
@@ -164,16 +145,16 @@ def get_image_files_cached(folder: str) -> Tuple[str, ...]:
 # =================================================================================
 class WorkerSignals(QObject):
     """Signals for FrameExtractorWorker."""
-    log = Signal(str, str)  # message, level
-    progress = Signal(int, int, int)  # done, total, success
-    finished = Signal(bool, int, int, float)  # stopped, success, total, elapsed
+    log = Signal(str, str)
+    progress = Signal(int, int, int)
+    finished = Signal(bool, int, int, float)
 
 class ScanSignals(QObject):
     """Signals for TimelineScanWorker."""
-    log = Signal(str, str)  # message, tag
-    status = Signal(str)  # status text
-    progress = Signal(int, int)  # NEW: current, total
-    finished = Signal(bool)  # has_error
+    log = Signal(str, str)
+    status = Signal(str)
+    progress = Signal(int, int)
+    finished = Signal(bool)
 
 # =================================================================================
 # WORKERS
@@ -195,7 +176,6 @@ class FrameExtractorWorker(QThread):
         """Main worker execution loop."""
         in_path = Path(self.folder)
 
-        # Efficiently gather video files
         video_files = [f for f in in_path.glob('*') if f.suffix.lower() in VIDEO_EXTENSIONS]
         total = len(video_files)
 
@@ -208,7 +188,6 @@ class FrameExtractorWorker(QThread):
         done, success = 0, 0
         start_time = time.time()
 
-        # Process videos in parallel
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
             futures = {executor.submit(self._extract, f, in_path, self.seconds): f for f in video_files}
 
@@ -225,7 +204,6 @@ class FrameExtractorWorker(QThread):
                     else:
                         self.signals.log.emit(f"Failed: {file.name}", "ERROR")
                 except Exception as e:
-                    # NEW: Detailed error logging
                     error_msg = f"Error processing {file.name}: {str(e)}"
                     self.signals.log.emit(error_msg, "ERROR")
                     self.signals.log.emit(f"Traceback: {traceback.format_exc()}", "ERROR")
@@ -247,7 +225,6 @@ class FrameExtractorWorker(QThread):
             if not cap.isOpened():
                 return False
 
-            # Get video properties with validation
             fps = cap.get(cv2.CAP_PROP_FPS)
             if not fps or fps <= 0:
                 fps = DEFAULT_FPS
@@ -256,22 +233,18 @@ class FrameExtractorWorker(QThread):
             if total_frames <= 0:
                 return False
 
-            # Calculate target frame with bounds checking
             target_frame = min(int(fps * sec), total_frames - 1)
-            target_frame = max(0, target_frame)  # Ensure non-negative
+            target_frame = max(0, target_frame)
 
-            # Seek to target frame
             cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
             ret, frame = cap.read()
 
             if not ret or frame is None or frame.size == 0:
                 return False
 
-            # Generate safe output filename
             safe_name = sanitize_filename(unidecode(path.stem))
             output_path = out_dir / f"{safe_name}.jpg"
 
-            # Write frame with high quality
             success = cv2.imwrite(
                 str(output_path),
                 frame,
@@ -280,7 +253,6 @@ class FrameExtractorWorker(QThread):
             return success
 
         except Exception as e:
-            # NEW: Log exception details
             print(f"Exception in _extract: {e}\n{traceback.format_exc()}")
             return False
         finally:
