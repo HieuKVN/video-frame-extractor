@@ -10,7 +10,6 @@ OPTIMIZED VERSION with:
 - File caching for better performance
 - Enhanced UI/UX with progress indicators
 - Drag-and-drop support
-- Timeline input history
 - Keyboard shortcuts
 """
 
@@ -33,10 +32,10 @@ from xml.etree.ElementTree import Element, SubElement, tostring
 import cv2
 from PySide6.QtCore import QObject, Qt, QThread, Signal
 from PySide6.QtGui import QColor, QDragEnterEvent, QDropEvent, QFont, QTextCharFormat, QTextCursor, QKeySequence, QShortcut
-from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QGroupBox,
+from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame,
                                QHBoxLayout, QLabel, QLineEdit, QMainWindow,
                                QMessageBox, QProgressBar, QPushButton,
-                               QTabWidget, QTextEdit, QVBoxLayout, QWidget, QComboBox)
+                               QTabWidget, QTextEdit, QVBoxLayout, QWidget)
 
 # Unicode handling with fallback
 try:
@@ -54,8 +53,7 @@ DEFAULT_TIME_EXTRACT = "00:15"
 JPEG_QUALITY = 90
 DEFAULT_CLIP_DURATION = 300  # 5 minutes in seconds
 FUZZY_MATCH_CUTOFF = 0.6
-MAX_LOG_LINES = 1000  # NEW: Limit log size to prevent memory issues
-MAX_HISTORY_ITEMS = 10  # NEW: Maximum timeline history items
+MAX_LOG_LINES = 1000  # Limit log size to prevent memory issues
 
 VIDEO_EXTENSIONS: Set[str] = {'.mp4', '.mkv', '.avi', '.mov', '.flv', '.wmv', '.webm'}
 IMAGE_EXTENSIONS: Set[str] = {".png", ".jpg", ".jpeg", ".bmp", ".webp"}
@@ -870,9 +868,8 @@ class TimelineGeneratorTab(QWidget, LogMixin):
         self.scan_has_error = False
         self.processed_clips: List[Dict] = []
         self.worker: Optional[TimelineScanWorker] = None
-        self.timeline_history: List[str] = []  # NEW: History tracking
         self.init_ui()
-        self.setup_shortcuts()  # NEW
+        self.setup_shortcuts()
 
     def init_ui(self) -> None:
         """Initialize the user interface."""
@@ -883,43 +880,11 @@ class TimelineGeneratorTab(QWidget, LogMixin):
         # Header
         layout.addLayout(self._create_header())
 
-        # Input Section with history
-        input_header = QHBoxLayout()
-        input_header.setSpacing(12)
-
+        # Input Section
         input_label = QLabel("📝  Timeline Input")
         input_label.setFont(QFont("Segoe UI", 11, QFont.Bold))
         input_label.setStyleSheet("color: #cdd6f4; margin-bottom: 4px;")
-        input_header.addWidget(input_label)
-
-        # NEW: History dropdown
-        self.history_combo = QComboBox()
-        self.history_combo.setMinimumWidth(150)
-        self.history_combo.setMaximumWidth(200)
-        self.history_combo.setMinimumHeight(28)
-        self.history_combo.setFont(QFont("Segoe UI", 9))
-        self.history_combo.setStyleSheet("""
-            QComboBox {
-                background: #1e1e2e;
-                border: 1px solid #313244;
-                border-radius: 6px;
-                padding: 4px 8px;
-                color: #a6adc8;
-            }
-            QComboBox:hover {
-                border: 1px solid #45475a;
-            }
-            QComboBox::drop-down {
-                border: none;
-                width: 20px;
-            }
-        """)
-        self.history_combo.addItem("📜 History")
-        self.history_combo.currentTextChanged.connect(self.load_from_history)
-        input_header.addStretch()
-        input_header.addWidget(self.history_combo)
-
-        layout.addLayout(input_header)
+        layout.addWidget(input_label)
 
         self.timeline_input = QTextEdit()
         self.timeline_input.setFont(QFont("Consolas", 12))
@@ -934,7 +899,7 @@ class TimelineGeneratorTab(QWidget, LogMixin):
             }
         """)
         self.timeline_input.setPlainText("00:00:00:00 Song A\n00:04:28:15 Song B")
-        self.timeline_input.setPlaceholderText("Format: HH:MM:SS:FF Clip Name")  # NEW
+        self.timeline_input.setPlaceholderText("Format: HH:MM:SS:FF Clip Name")
         layout.addWidget(self.timeline_input)
 
         # Results Section
@@ -1070,7 +1035,6 @@ class TimelineGeneratorTab(QWidget, LogMixin):
 
         return btn_layout
 
-    # NEW: Keyboard shortcuts
     def setup_shortcuts(self) -> None:
         """Setup keyboard shortcuts."""
         # Ctrl+S to scan
@@ -1081,33 +1045,6 @@ class TimelineGeneratorTab(QWidget, LogMixin):
         export_shortcut = QShortcut(QKeySequence("Ctrl+E"), self)
         export_shortcut.activated.connect(self.export_xml)
 
-    # NEW: History management
-    def save_to_history(self, timeline_text: str) -> None:
-        """Save timeline to history."""
-        if timeline_text and timeline_text not in self.timeline_history:
-            self.timeline_history.insert(0, timeline_text)
-            if len(self.timeline_history) > MAX_HISTORY_ITEMS:
-                self.timeline_history.pop()
-
-            # Update combo box
-            self.history_combo.clear()
-            self.history_combo.addItem("📜 History")
-            for i, text in enumerate(self.timeline_history):
-                preview = text.split('\n')[0][:30] + "..." if len(text) > 30 else text.split('\n')[0]
-                self.history_combo.addItem(f"{i+1}. {preview}")
-
-    def load_from_history(self, text: str) -> None:
-        """Load timeline from history."""
-        if text.startswith("📜"):
-            return
-
-        try:
-            index = int(text.split('.')[0]) - 1
-            if 0 <= index < len(self.timeline_history):
-                self.timeline_input.setPlainText(self.timeline_history[index])
-        except (ValueError, IndexError):
-            pass
-
     def start_scan(self) -> None:
         """Start scanning images and matching with timeline."""
         if not os.path.exists(DEFAULT_FOLDER):
@@ -1115,9 +1052,6 @@ class TimelineGeneratorTab(QWidget, LogMixin):
             return
 
         timeline_text = self.timeline_input.toPlainText()
-
-        # NEW: Save to history
-        self.save_to_history(timeline_text)
 
         self.scan_btn.setEnabled(False)
         self.scan_btn.setText("⏳  Scanning...")
